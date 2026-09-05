@@ -22,14 +22,38 @@ type datasetPath struct {
 	Name   string
 }
 
-var supportedCompression = []string{"off", "lz4", "gzip", "gzip-1", "gzip-9", "zstd", "zstd-fast", "zle", "lzjb", "zstd-1", "zstd-2", "zstd-3", "zstd-4", "zstd-5", "zstd-6", "zstd-7", "zstd-8", "zstd-9", "zstd-10", "zstd-11", "zstd-12", "zstd-13", "zstd-14", "zstd-15", "zstd-16", "zstd-17", "zstd-18", "zstd-19", "zstd-fast-1", "zstd-fast-2", "zstd-fast-3", "zstd-fast-4", "zstd-fast-5", "zstd-fast-6", "zstd-fast-7", "zstd-fast-8", "zstd-fast-9", "zstd-fast-10", "zstd-fast-20", "zstd-fast-30", "zstd-fast-40", "zstd-fast-50", "zstd-fast-60", "zstd-fast-70", "zstd-fast-80", "zstd-fast-90", "zstd-fast-100", "zstd-fast-500", "zstd-fast-1000"}
+// FIXED (ivomarino fork, 2026-09-05): "on" was missing entirely -- a
+// real, standard ZFS compression keyword (means "use the pool/parent's
+// own default algorithm", not a placeholder or legacy alias) that a
+// dataset reports whenever compression was never explicitly overridden
+// (source=DEFAULT). Confirmed live against a real TrueNAS CORE/FreeCORE
+// host: several genuine, un-configured datasets report exactly this
+// value, and every one of them failed ValidateResourceConfig/read with
+// "expected compression to be one of [...], got on" until this was
+// added -- not a hypothetical gap.
+var supportedCompression = []string{"on", "off", "lz4", "gzip", "gzip-1", "gzip-9", "zstd", "zstd-fast", "zle", "lzjb", "zstd-1", "zstd-2", "zstd-3", "zstd-4", "zstd-5", "zstd-6", "zstd-7", "zstd-8", "zstd-9", "zstd-10", "zstd-11", "zstd-12", "zstd-13", "zstd-14", "zstd-15", "zstd-16", "zstd-17", "zstd-18", "zstd-19", "zstd-fast-1", "zstd-fast-2", "zstd-fast-3", "zstd-fast-4", "zstd-fast-5", "zstd-fast-6", "zstd-fast-7", "zstd-fast-8", "zstd-fast-9", "zstd-fast-10", "zstd-fast-20", "zstd-fast-30", "zstd-fast-40", "zstd-fast-50", "zstd-fast-60", "zstd-fast-70", "zstd-fast-80", "zstd-fast-90", "zstd-fast-100", "zstd-fast-500", "zstd-fast-1000"}
 var encryptionAlgorithms = []string{"AES-128-CCM", "AES-192-CCM", "AES-256-CCM", "AES-128-GCM", "AES-192-GCM", "AES-256-GCM"}
 var recordSizes = []string{"512", "1K", "2K", "4K", "8K", "16K", "32K", "64K", "128K", "256K", "512K", "1024K"}
 
 // newDatasetPath creates new datasetPath struct
 // from TrueNAS dataset ID string, that comes in format: Pool/Parent/dataset_name
+//
+// FIXED (ivomarino fork, 2026-09-05): a pool-root dataset's own id IS
+// just the pool name (e.g. "tank0"), zero slashes -- strings.Split
+// then returns a single-element slice, and the original code's
+// s[1:len(s)-1] became s[1:0], an invalid Go slice bound (start > end),
+// panicking with "slice bounds out of range [1:0]" on every attempt to
+// read a pool-root dataset. Confirmed live against a real TrueNAS
+// CORE/FreeCORE host: a root dataset's own API response reports
+// "name" equal to its own id/pool name (no separate parent), so that's
+// what's reflected here too -- Pool == Name, Parent == "".
 func newDatasetPath(id string) datasetPath {
 	s := strings.Split(id, "/")
+
+	if len(s) == 1 {
+		// pool-root dataset: id is just the pool name, no parent
+		return datasetPath{Pool: s[0], Name: s[0], Parent: ""}
+	}
 
 	if len(s) == 2 {
 		// there is no Parent

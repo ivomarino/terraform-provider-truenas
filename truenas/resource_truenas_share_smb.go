@@ -170,12 +170,24 @@ func resourceTrueNASShareSMBRead(ctx context.Context, d *schema.ResourceData, m 
 		return diag.FromErr(err)
 	}
 
-	resp, http, err := c.SharingApi.GetShareSMB(ctx, int32(id)).Execute()
+	resp, httpResp, err := c.SharingApi.GetShareSMB(ctx, int32(id)).Execute()
 
 	if err != nil {
 		// gracefully handle manual deletions
 		d.SetId("")
-		if http.StatusCode == 404 {
+		// FIXED (ivomarino fork, 2026-09-05): httpResp can be nil here even
+		// though err is non-nil -- confirmed live against a real TrueNAS
+		// CORE/FreeCORE host: reading any of 3 genuinely live, existing SMB
+		// shares (not deleted, not 404s) panicked with a nil-pointer
+		// dereference on the original `http.StatusCode` access, crashing
+		// the whole provider process. Root cause not fully isolated to one
+		// specific response shape (the underlying OpenAPI-generated client
+		// can return a nil response alongside a non-nil error on certain
+		// deserialization/transport failures, a known gotcha with this
+		// SDK generator), but a nil check here is correct regardless of
+		// the exact trigger -- was never a case the original code
+		// accounted for at all.
+		if httpResp != nil && httpResp.StatusCode == 404 {
 			return nil
 		}
 		return diag.Errorf("error getting smb share: %s", err)

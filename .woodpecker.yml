@@ -1,0 +1,50 @@
+# Mirrors tofu-provider-sylve's own .woodpecker.yml exactly (this
+# fleet's established pattern for a from-scratch/forked Go Tofu
+# provider) -- go 1.22 (this fork's own go.mod pins go 1.18, but the
+# actual toolchain used to build/test is newer, matching what's already
+# proven working via a direct golang:1.22 container build 2026-09-05).
+#
+# Real difference from tofu-provider-sylve's pipeline: that one only
+# validates (gofmt/vet/build/test), it never needed to produce a
+# retrievable artifact since its own binary was built+committed once,
+# manually, outside CI. This fork DOES need the built binary back (for
+# dev_overrides use against sail-atlantis), and this fleet's Woodpecker
+# has no built-in artifact store -- the same Cloudflare R2 bucket
+# already used for every module's own Tofu state (infra-tofu-state) is
+# reused here instead, under a separate `artifacts/` prefix so it can
+# never collide with any real state key.
+when:
+  event: [push, pull_request, manual]
+
+labels:
+  hostname: build.northstage
+
+steps:
+  - name: gofmt
+    image: golang:1.22
+    commands:
+      - out=$(gofmt -l .)
+      - if [ -n "$out" ]; then echo "$out"; exit 1; fi
+
+  - name: vet
+    image: golang:1.22
+    commands:
+      - go vet ./...
+
+  - name: build
+    image: golang:1.22
+    commands:
+      - go build -o terraform-provider-truenas_v0.11.1-ivomarino1 .
+
+  - name: upload-artifact
+    image: amazon/aws-cli:2.17.62
+    environment:
+      AWS_ACCESS_KEY_ID:
+        from_secret: r2_access_key_id
+      AWS_SECRET_ACCESS_KEY:
+        from_secret: r2_secret_access_key
+    commands:
+      - >-
+        aws --endpoint-url https://88ef118e2397d4ac2a6c16c0fff5b6c9.r2.cloudflarestorage.com
+        s3 cp terraform-provider-truenas_v0.11.1-ivomarino1
+        s3://infra-tofu-state/artifacts/terraform-provider-truenas/terraform-provider-truenas_v0.11.1-ivomarino1
